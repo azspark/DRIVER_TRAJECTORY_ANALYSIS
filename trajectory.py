@@ -3,13 +3,15 @@ import pandas as pd
 from geopy.distance import distance
 import folium
 from utils import base_stat
+from collections import Counter
+import math
 
 
 class Trajectory:
     """Calculate and store the feature of single trajectory"""
 
     extracted_feature = ['']
-    def __init__(self, coords, timestamps, driver_id, turning_threshold, count_graph_feature):
+    def __init__(self, coords, timestamps, driver_id, turning_threshold, use_graph_feature=False):
         """
         Args:
         - coords: np.ndarray, [(lon1, lat1), (lon2, lat2), ...]
@@ -21,15 +23,20 @@ class Trajectory:
         self.angles = None
         self.accelerations = None
         self.with_noise_point = False
+        self.too_much_noise = False
 
         self.turning_threshold = turning_threshold
-        self.count_graph_feature = count_graph_feature
+        self.use_graph_feature = use_graph_feature
         self.coords = np.array(coords)
         self.timestamps = timestamps
         self.driver_id = driver_id
         self.get_accleration()
-        self.get_angles()
-        self._driving_state()
+
+        if not self.too_much_noise:  # won't use too noisy traj
+            self.get_angles()
+            self._driving_state()
+            if self.use_graph_feature:
+                self._init_graph_feat_param()
 
 
     def get_distance(self):
@@ -50,6 +57,9 @@ class Trajectory:
         speeds = distances / self.time_diff
         speeds = np.concatenate((np.array([0.0]), speeds), axis=0)  # add zero speed for the first point
         normal_idx = speeds < 38.9  # 140km/h, 140 / 3.6 = 38.8888; dtype=boolean65
+        normal_coord_num = sum(normal_idx)
+        if normal_coord_num < 5 or sum(normal_idx) / float(len(normal_idx)) < 0.5:
+            self.too_much_noise = True
         if False in normal_idx:  # directly delete the abnormal part
             # print(normal_idx)
             self.with_noise_point = True
@@ -68,32 +78,75 @@ class Trajectory:
         self.accelerations = np.concatenate((np.array([0.0]), (speeds_diff / self.time_diff)), axis=0)  # add zero accleration for the first point
         return self.accelerations
 
+    # def get_angles(self):
+    #     angles = []
+    #     for idx, coord in enumerate(self.coords[:-1]):
+    #         # angles.append(np.arccos(np.dot(coord,self.coords[idx+1])/(np.linalg.norm(coord)*np.linalg.norm(self.coords[idx+1]))))  # no, arccos is not good for this
+            
+    #         if self.distances[idx] >= 0.1:  # it's meaningless to compute the angle when drving real small distance
+    #             coord_diff = self.coords[idx+1] - coord
+    #             theta = np.arctan(coord_diff[1] / coord_diff[0])
+    #             if coord_diff[1] < 0:
+    #                 theta = np.math.pi + theta
+    #             angles.append(theta)
+    #         else:
+    #             if len(angles) > 0:
+    #                 angles.append(angles[-1])
+    #             else:
+    #                 angles.append(0.0)
+    #     self.angles = np.array(angles + [angles[-1]])  # add for last point
+    #     return self.angles
+
     def get_angles(self):
+        if self.angles is not None:
+            return self.angles
         angles = []
         for idx, coord in enumerate(self.coords[:-1]):
             # angles.append(np.arccos(np.dot(coord,self.coords[idx+1])/(np.linalg.norm(coord)*np.linalg.norm(self.coords[idx+1]))))  # no, arccos is not good for this
-            
+            # import pdb; pdb.set_trace()
             if self.distances[idx] >= 0.1:  # it's meaningless to compute the angle when drving real small distance
                 coord_diff = self.coords[idx+1] - coord
+                if coord_diff[0] == 0:
+                    coord_diff[0] = 1e-8
                 theta = np.arctan(coord_diff[1] / coord_diff[0])
-                if coord_diff[1] < 0:
-                    theta = np.math.pi + theta
+                # if coord_diff[1] < 0:
+                #     theta = math.pi + theta
                 angles.append(theta)
             else:
                 if len(angles) > 0:
                     angles.append(angles[-1])
                 else:
                     angles.append(0.0)
-        self.angles = np.array(angles + [angles[-1]])  # add for last point
+        try:
+            self.angles = angles + [angles[-1]]  # add for last point
+        except Exception as e:
+            self.angles = angles + [0.0]
+        self.angles = np.array(self.angles)
         return self.angles
 
     def get_basic_feature(self):
-        return base_stat(self.speeds) + base_stat(self.accelerations) + base_stat(self.speeds[self.is_turning]) + base_stat(self.accelerations[self.is_turning])
+
+        out = [self.too_much_noise]
+        if not self.too_much_noise:
+            out += base_stat(self.speeds)
+            out += base_stat(self.accelerations)
+            out += base_stat(self.speeds[self.is_turning])
+            out += base_stat(self.accelerations[self.is_turning])
+        else:
+            out += [0.0 for i in range(20)]
+        return out
+    
+    def get_graph_feature(self):
+        if not self.too_much_noise:
+            return list(self.get_seq_vector()) + list(self.get_graph_vector())
+        else:
+            return [0.0 for i in range(36)]
 
     def _driving_state(self):
         """judge car is turning or not"""
         angle_diff = self.angles[1:] - self.angles[:-1]
         self.angle_diff = np.concatenate((np.array([0.0]), angle_diff), axis=0)
+
         self.is_turning = self.angle_diff > self.turning_threshold
 
 
@@ -117,4 +170,114 @@ class Trajectory:
 
 
     def _init_graph_feat_param(self):
-        pass
+        self.transition_graph = None
+        self.transition_sequence = None
+        self.driving_state = {'acceleration':0, 'constant':1, 'deceleration':2}
+        self.direction_state = {'straight': 3, 'turn': 4}
+        self.state2id = dict()
+        idx = 0
+        for state in self.driving_state.values():
+            for direction in self.direction_state.values():
+                self.state2id[(state, direction)] = idx
+                idx += 1
+
+    def get_seq_vector(self):
+        """transpose the seq to the vector
+
+        Returns:
+            np.array: dim 9
+        """
+        self.transition_sequence = self.get_seq()
+        id_seq = map(lambda x : self.state2id[x], self.transition_sequence)
+        count = Counter(id_seq)
+        v = np.zeros(len(self.state2id))
+        # import pdb; pdb.set_trace()
+        for key in count:
+            v[key] = count[key]
+        if np.sum(v) != 0.0:
+            norm_v = (v - np.min(v)) / (np.max(v) - 0)
+        else:
+            norm_v = v
+        return norm_v
+    
+    def get_graph_vector(self):
+        """transpose the edge of the graph to vector
+
+        Returns:
+            np.array: dim 36
+        """
+        self.transition_graph = self.get_graph()
+        graph_vec = self.transition_graph.reshape(-1)
+        if np.sum(graph_vec) != 0.0:
+            normed_graph_vec = (graph_vec - np.min(graph_vec)) / (np.max(graph_vec) - 0)
+        else:
+            normed_graph_vec = graph_vec
+        
+        return normed_graph_vec
+
+
+    def get_seq(self):
+        """generate seq with element (drivingstateid, directionid)
+
+        Returns:
+            list: [(1,4), (2,4), (3,6)...]
+        """
+        if self.transition_sequence is not None:
+            return self.transition_sequence
+        self.transition_sequence = []
+        s = self.driving_state['constant']
+        a = self.direction_state['straight']
+        for state, dir in zip(self.accelerations, self.angle_diff):
+            if state > 0.1:
+                s = self.driving_state['acceleration']
+            elif state < -0.1:
+                s = self.driving_state['deceleration']
+            else:
+                s = self.driving_state['constant']
+
+            if dir > self.turning_threshold:
+                a = self.direction_state['turn']
+            else:
+                a = self.direction_state['straight']
+            self.transition_sequence.append((s,a))
+        return self.transition_sequence
+
+    def get_graph(self):
+        """generate the transition graph from the driving state sequence
+
+        Returns:
+            np.array: (state_dim, state_dim)
+        """
+        if self.transition_graph is not None:
+            return self.transition_graph
+        self.transition_sequence = self.get_seq()
+        self.transition_graph = np.zeros((len(self.state2id), len(self.state2id)))
+        for idx, state in enumerate(self.transition_sequence[:-1]):
+            state_id_src = self.state2id[self.transition_sequence[idx]]
+            state_id_tar = self.state2id[self.transition_sequence[idx+1]]
+            self.transition_graph[state_id_src][state_id_tar] += 1
+        # self state transition is set to 0.
+        # for i in range(len(self.transition_graph)):
+        #     self.transition_graph[i][i] = 0
+        return self.transition_graph
+
+    # def get_delta_theta(self):
+    #     """get the delta direction for each timestamp
+
+    #     """
+    #     if self.delta_theta is not None:
+    #         return self.delta_theta
+    #     self.angles = self.get_angles()
+    #     delta = []
+    #     for idx, angle in enumerate(self.angles[:-1]):
+    #         tmp_angle = abs(self.angles[idx+1] - angle)
+    #         tmp2 = math.pi*2 - self.angles[idx+1] - angle
+    #         if abs(tmp2) < abs(tmp_angle):
+    #             tmp_angle = tmp2
+    #         delta.append(tmp_angle)
+    #     self.delta_theta = np.array([0] + delta)
+
+    #     # print(f'direction: {np.max(self.delta_theta)}')
+    #     # print(f'direction: {np.mean(self.delta_theta)}')
+        
+    #     return self.delta_theta
