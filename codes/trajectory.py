@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from geopy.distance import distance
 import folium
-from utils import base_stat
+from .utils import base_stat
 from collections import Counter
 import math
 
@@ -11,7 +11,7 @@ class Trajectory:
     """Calculate and store the feature of single trajectory"""
 
     extracted_feature = ['']
-    def __init__(self, coords, timestamps, driver_id, turning_threshold, use_graph_feature=False):
+    def __init__(self, coords, timestamps, driver_id, turning_threshold, use_graph_feature=False, acc_threshold=0.1):
         """
         Args:
         - coords: np.ndarray, [(lon1, lat1), (lon2, lat2), ...]
@@ -26,6 +26,7 @@ class Trajectory:
         self.too_much_noise = False
 
         self.turning_threshold = turning_threshold
+        self.acc_threshold = acc_threshold
         self.use_graph_feature = use_graph_feature
         self.coords = np.array(coords)
         self.timestamps = timestamps
@@ -143,7 +144,7 @@ class Trajectory:
         if not self.too_much_noise:
             return list(self.get_seq_vector()) + list(self.get_graph_vector())
         else:
-            return [0.0 for i in range(36)]
+            return [self.too_much_noise] + [0.0 for i in range(36)]
 
     def _driving_state(self):
         """judge car is turning or not"""
@@ -231,9 +232,9 @@ class Trajectory:
         s = self.driving_state['constant']
         a = self.direction_state['straight']
         for state, dir in zip(self.accelerations, self.angle_diff):
-            if state > 0.1:
+            if state > self.acc_threshold:
                 s = self.driving_state['acceleration']
-            elif state < -0.1:
+            elif state < -self.acc_threshold:
                 s = self.driving_state['deceleration']
             else:
                 s = self.driving_state['constant']

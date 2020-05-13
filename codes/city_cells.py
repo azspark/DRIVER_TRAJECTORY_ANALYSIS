@@ -1,5 +1,5 @@
-from cell import Cell
-from utils import Engrider
+from .cell import Cell
+from .utils import Engrider
 
 class CityCells:
     """Index, control and update the cell information"""
