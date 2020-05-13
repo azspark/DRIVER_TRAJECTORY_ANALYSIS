@@ -212,7 +212,7 @@ class DrivingState:
             tmp_angle = abs(self.angles[idx+1] - angle)
             tmp2 = math.pi*2 - self.angles[idx+1] - angle
             if abs(tmp2) < abs(tmp_angle):
-                tmp_angle = tmp2
+                tmp_angle = abs(tmp2)
             delta.append(tmp_angle)
         self.delta_theta = np.array([0] + delta)
 
