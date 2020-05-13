@@ -130,8 +130,11 @@ class Trajectory:
         if not self.too_much_noise:
             out += base_stat(self.speeds)
             out += base_stat(self.accelerations)
-            out += base_stat(self.speeds[self.is_turning])
-            out += base_stat(self.accelerations[self.is_turning])
+            if sum(self.is_turning) > 0:
+                out += base_stat(self.speeds[self.is_turning])
+                out += base_stat(self.accelerations[self.is_turning])
+            else:
+                out += [0.0 for i in range(10)]
         else:
             out += [0.0 for i in range(20)]
         return out
