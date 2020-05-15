@@ -6,7 +6,8 @@ from utils import *
 
 class TrajectoryDataset:
     """Manipulate trajectories and cells information, prepare data for feature engineering""" 
-    def __init__(self, df, count_cell_info=False, data_type='porto', use_graph_feature=False, geo_range=None, div_number=None, turning_threshold=0.3, acc_threshold=0.1):
+    def __init__(self, df, count_cell_info=False, data_type='porto', timezone='Europe/Lisbon',
+         use_graph_feature=False, geo_range=None, div_number=None, turning_threshold=0.3, acc_threshold=0.1):
         """
         Args:
         - df: pd.DataFrame, at least include following information with specified column names:
@@ -20,25 +21,33 @@ class TrajectoryDataset:
         - turning_threshold: float, angle threshold to determinte wheather a driver is steering
         """
         self.df = df
+        self.df.set_index(np.arange(df.shape[0]), inplace=True)
         self.with_cell_info = count_cell_info
         self.turning_threshold = turning_threshold
         self.use_graph_feature = use_graph_feature
         self.acc_threshold = acc_threshold
+        self.timezone = timezone
+        self.data_type = data_type
+
+        self._dataframe_preprocess()
         self._init_trajectories()
         if count_cell_info:
             self.city_cells = CityCells(self.trajectories, geo_range, div_number)
 
+        self.df_feature = None
+
     def _dataframe_preprocess(self):
         """Generate more feature for analysis"""
         # 1. add baisc feature like date, time in day, ....
-        pass  # TODO
+        self.df['TIME'] =  pd.to_datetime(self.df['TIMESTAMP'], unit='s', utc=True)
+        self.df.TIME = self.df.TIME.dt.tz_convert(self.timezone)
         # 2. group df for specific driver analysis
-        self.grouped_df = self.df.groupby('TAXI_ID')
+        self.grouped_df = self.df.groupby('LABEL')
 
     def _init_trajectories(self):
         """Initilize trajectory objects"""
         
-        self.trajectories = [Trajectory(r['POLYLINE'], porto_timestamps(r['TIMESTAMP'], len(r['POLYLINE'])), r['LABEL'], 
+        self.trajectories = [Trajectory(r['POLYLINE'], porto_timestamps(r['TIMESTAMP'], len(r['POLYLINE'])), r['LABEL'], traj_id=i,
             turning_threshold=self.turning_threshold, use_graph_feature=self.use_graph_feature, acc_threshold=self.acc_threshold) for i, r in self.df.iterrows()]
         
     
@@ -49,6 +58,8 @@ class TrajectoryDataset:
         - df_traj_feature: pd.DataFrame
         - label: trajectory driver labels
         """
+        if self.df_feature is not None:
+            return self.df_feature
         trajs_feature = [traj.get_basic_feature() for traj in self.trajectories]
         self.df_feature = pd.DataFrame(trajs_feature)
         self.df_feature["LABEL"] = self.df["LABEL"]
@@ -57,18 +68,22 @@ class TrajectoryDataset:
     def generate_graph_feature(self):
         """Generate drving state trainsition graph feature"""
         traj_graph_feature = [traj.get_graph_feature() for traj in self.trajectories]
-        self.df_feature = pd.DataFrame(traj_graph_feature)
-        self.df_feature["LABEL"] = self.df["LABEL"]
-        return self.df_feature
+        self.df_graph_feature = pd.DataFrame(traj_graph_feature)
+        self.df_graph_feature["LABEL"] = self.df["LABEL"]
+        return self.df_graph_feature
 
     
     def driver_statistics(self):
         """Overall statistics of every driver
         
         Return:
-        - driver_df: pd.DataFrame
+        - pd.DataFrame
         """
-        pass
+        df_feature_ = self.df_feature[~self.df_feature[0].values][['LABEL', 1, 2, 6, 7, 11, 12, 16, 17, 21, 22, 26, 27]]
+        df_feature_.columns = ['LABEL', 'Speed_Mean', 'Speed_Var', "Ac_Mean", "Ac_Var", "Dc_Mean", "Dc_Var", 
+        'Steer_Speed_Mean', 'Steer_Speed_Var', "Steer_Ac_Mean", "Steer_Ac_Var", "Steer_Dc_Mean", "Steer_Dc_var"]
+        df_feature_['DISTANCE'] = self.df[~self.df_feature[0].values]['DISTANCE']
+        return df_feature_.groupby('LABEL').mean()
 
     def get_driver(self, driver_id):
         """Get Driver class of specified id for further analysis"""

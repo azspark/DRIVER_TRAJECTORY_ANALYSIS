@@ -11,7 +11,7 @@ class Trajectory:
     """Calculate and store the feature of single trajectory"""
 
     extracted_feature = ['']
-    def __init__(self, coords, timestamps, driver_id, turning_threshold, use_graph_feature=False, acc_threshold=0.1):
+    def __init__(self, coords, timestamps, driver_id, traj_id, turning_threshold, use_graph_feature=False, acc_threshold=0.1):
         """
         Args:
         - coords: np.ndarray, [(lon1, lat1), (lon2, lat2), ...]
@@ -31,6 +31,7 @@ class Trajectory:
         self.coords = np.array(coords)
         self.timestamps = timestamps
         self.driver_id = driver_id
+        self.traj_id = traj_id
         self.get_accleration()
 
         if not self.too_much_noise:  # won't use too noisy traj
@@ -68,6 +69,7 @@ class Trajectory:
             self.distances = distances[normal_idx[1:]]
             self.time_diff = self.time_diff[normal_idx[1:]]
             self.coords = self.coords[normal_idx]
+            self.timestamps = self.timestamps[normal_idx]
         self.speeds = speeds
         return self.speeds
 
@@ -130,14 +132,14 @@ class Trajectory:
         out = [self.too_much_noise]
         if not self.too_much_noise:
             out += base_stat(self.speeds)
-            out += base_stat(self.accelerations)
+            out += base_stat(self.accelerations, count_pos_neg=True)
             if sum(self.is_turning) > 0:
                 out += base_stat(self.speeds[self.is_turning])
-                out += base_stat(self.accelerations[self.is_turning])
+                out += base_stat(self.accelerations[self.is_turning], count_pos_neg=True)
             else:
-                out += [0.0 for i in range(10)]
+                out += [0.0 for i in range(15)]
         else:
-            out += [0.0 for i in range(20)]
+            out += [0.0 for i in range(30)]
         return out
     
     def get_graph_feature(self):
@@ -151,10 +153,10 @@ class Trajectory:
         angle_diff = self.angles[1:] - self.angles[:-1]
         self.angle_diff = np.concatenate((np.array([0.0]), angle_diff), axis=0)
 
-        self.is_turning = self.angle_diff > self.turning_threshold
+        self.is_turning = np.absolute(self.angle_diff) > self.turning_threshold
 
 
-    def vis(self, with_marker=False):
+    def vis(self, with_marker=False, osm_map=None, time=None):
         """Visualization of this single trajectory
         
         Used in jupyter notebook for debug.
@@ -164,11 +166,18 @@ class Trajectory:
         """
         start_point = self.coords[0]
         traj = [(cd[1], cd[0]) for cd in self.coords]
-        m = folium.Map(location=traj[0], zoom_start=13)
-        folium.PolyLine(locations=traj, color='blue').add_to(m)
+        if osm_map is None:
+            m = folium.Map(location=traj[0], zoom_start=13)
+        else:
+            m = osm_map
+        line_tooltip="Driver:%d, index:%d" % (self.driver_id, self.traj_id)
+        if time is not None:
+            line_tooltip += ',' + str(time)
+        folium.PolyLine(locations=traj, color='blue', tooltip=line_tooltip).add_to(m)
         if with_marker:
             for idx, cd in enumerate(traj):
                 tool_tip = "pid:%d\nspeed:%.2fm/s\nacceleration:%.4f\nangles:%.4f" % (idx, self.speeds[idx], self.accelerations[idx], self.angles[idx])
+                tool_tip += "turning:%s" % str(self.is_turning[idx])
                 folium.Marker(location=cd, tooltip=tool_tip).add_to(m)
         return m
 
@@ -239,7 +248,7 @@ class Trajectory:
             else:
                 s = self.driving_state['constant']
 
-            if dir > self.turning_threshold:
+            if np.absolute(dir) > self.turning_threshold:
                 a = self.direction_state['turn']
             else:
                 a = self.direction_state['straight']
@@ -265,6 +274,11 @@ class Trajectory:
         #     self.transition_graph[i][i] = 0
         return self.transition_graph
 
+    def get_speed_info(self):
+        """Return speed and steering speed along with time.(API for CityCells)"""
+        return self.speeds, self.timestamps, self.speeds[self.is_turning], self.timestamps[self.is_turning]
+
+        
     # def get_delta_theta(self):
     #     """get the delta direction for each timestamp
 

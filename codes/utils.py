@@ -24,5 +24,15 @@ class Engrider:
         return region_lon_pos, region_lat_pos
 
 
-def base_stat(data):
-    return [data.mean(), data.var()] + list(np.percentile(data, [10,50,90]))
+def base_stat(data, count_pos_neg=False):
+    """Calculate basic statistics for sequence of data
+    
+    - count_pos_neg: seperately count statistics for positive and negetive part of data
+    """
+    if count_pos_neg:
+        pos_idx = data > 0.0
+        return base_stat(data[pos_idx], False) + base_stat(data[~pos_idx], False)
+    if len(data) > 0:
+        return [data.mean(), data.var()] + list(np.percentile(data, [10,50,90]))
+    else:
+        return [0.0 for i in range(5)]
