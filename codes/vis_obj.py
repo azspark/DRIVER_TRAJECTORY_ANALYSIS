@@ -10,14 +10,17 @@ class Viser:
         self.df['HOUR'] = df.TIME.dt.hour
         self.df['StartPoint'] = df.apply(lambda df: df['POLYLINE'][0], axis=1)
 
-    def _vis_trajs(self, idxs, with_marker):
+    def _vis_trajs(self, idxs, with_marker, mark_od_point=True, idxs2=None):
         start_coords = self.df.loc[idxs]['StartPoint'].values
         start_coords = np.array([[i[0], i[1]] for i in start_coords])
         middle_point = start_coords.mean(axis=0)
 
         m = folium.Map(location=(middle_point[1], middle_point[0]), zoom_start=13)
         for idx in idxs:
-            self.trajectories[idx].vis(with_marker, osm_map=m, time=self.df.loc[idx]['TIME'])
+            self.trajectories[idx].vis(with_marker, osm_map=m, time=self.df.loc[idx]['TIME'], mark_od_point=mark_od_point)
+        if idxs2 is not None:
+            for idx in idxs2:
+                self.trajectories[idx].vis(with_marker, osm_map=m, time=self.df.loc[idx]['TIME'], mark_od_point=mark_od_point, color='red')
         return m
     
     def start_point_distribution_visulization(self, date=None, hour=None):

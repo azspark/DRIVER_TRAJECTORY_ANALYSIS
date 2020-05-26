@@ -156,13 +156,14 @@ class Trajectory:
         self.is_turning = np.absolute(self.angle_diff) > self.turning_threshold
 
 
-    def vis(self, with_marker=False, osm_map=None, time=None):
+    def vis(self, with_marker=False, osm_map=None, time=None, mark_od_point=True, color='blue'):
         """Visualization of this single trajectory
         
-        Used in jupyter notebook for debug.
+        Used in jupyter notebook.
         Attention: folium accept trajectories in (lat, lon) format.
         Args:
         - with_marker: boolean, if true, driving details of each point will be shown on traj with marker
+        - mark_od_point: if true will display origin and destion with marker no matter 'with_marker'
         """
         start_point = self.coords[0]
         traj = [(cd[1], cd[0]) for cd in self.coords]
@@ -173,12 +174,21 @@ class Trajectory:
         line_tooltip="Driver:%d, index:%d" % (self.driver_id, self.traj_id)
         if time is not None:
             line_tooltip += ',' + str(time)
-        folium.PolyLine(locations=traj, color='blue', tooltip=line_tooltip).add_to(m)
+        folium.PolyLine(locations=traj, color=color, tooltip=line_tooltip).add_to(m)
+        if mark_od_point:
+            start_tooltip = 'Start' + str(self.driver_id) + ':' + str(self.traj_id)
+            end_tooltip = 'End' + str(self.driver_id) + ':' + str(self.traj_id)
+            folium.Marker(location=traj[0], tooltip=start_tooltip, icon=folium.map.Icon(color='orange')).add_to(m)
+            folium.Marker(location=traj[-1], tooltip=end_tooltip, icon=folium.map.Icon(color='lightblue')).add_to(m)
         if with_marker:
+            len_traj = len(traj)
             for idx, cd in enumerate(traj):
-                tool_tip = "pid:%d\nspeed:%.2fm/s\nacceleration:%.4f\nangles:%.4f" % (idx, self.speeds[idx], self.accelerations[idx], self.angles[idx])
+                if mark_od_point and (idx == 0 or idx == len_traj-1):
+                    continue
+                tool_tip = "Driver:%d;pid:%d<br />speed:%.2fm/s acceleration:%.4f angles:%.4f" % (self.driver_id, idx, 
+                    self.speeds[idx], self.accelerations[idx], self.angles[idx])
                 tool_tip += "turning:%s" % str(self.is_turning[idx])
-                folium.Marker(location=cd, tooltip=tool_tip).add_to(m)
+                folium.Marker(location=cd, tooltip=tool_tip, icon=folium.map.Icon(color=color)).add_to(m)
         return m
 
 
