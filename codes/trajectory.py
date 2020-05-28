@@ -11,12 +11,14 @@ class Trajectory:
     """Calculate and store the feature of single trajectory"""
 
     extracted_feature = ['']
-    def __init__(self, coords, timestamps, driver_id, traj_id, turning_threshold, use_graph_feature=False, acc_threshold=0.1):
+    def __init__(self, coords, timestamps, driver_id, traj_id, turning_threshold=0.3, 
+        use_graph_feature=False, acc_threshold=0.1, base_feat=True):
         """
         Args:
         - coords: np.ndarray, [(lon1, lat1), (lon2, lat2), ...]
         - timestamps: np.ndarray, unix time, same length as coords
         - driver_id: np.ndarray,
+        - base_feat: bool, if calculate basic feature such as speed, accleration
         """
         self.distances = None
         self.speeds = None
@@ -32,9 +34,10 @@ class Trajectory:
         self.timestamps = timestamps
         self.driver_id = driver_id
         self.traj_id = traj_id
-        self.get_accleration()
+        if base_feat:
+            self.get_accleration()
 
-        if not self.too_much_noise:  # won't use too noisy traj
+        if base_feat and not self.too_much_noise:  # won't use too noisy traj
             self.get_angles()
             self._driving_state()
             if self.use_graph_feature:

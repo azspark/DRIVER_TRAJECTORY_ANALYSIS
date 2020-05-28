@@ -9,7 +9,7 @@ class TrajectoryDataset:
     """Manipulate trajectories and cells information, prepare data for feature engineering""" 
     def __init__(self, df, count_cell_info=False, data_type='porto', timezone='Europe/Lisbon',
          use_graph_feature=False, geo_range=None, div_number=None, turning_threshold=0.3, 
-         acc_threshold=0.1, count_od_info=True):
+         acc_threshold=0.1, count_od_info=True, base_feat=True):
         """
         Args:
         - df: pd.DataFrame, at least include following information with specified column names:
@@ -23,6 +23,7 @@ class TrajectoryDataset:
         - turning_threshold: float, angle threshold to determinte wheather a driver is steering
         - acc_threshold: float, accleration threshold 
         - count_od_info: boolean, with Origin Destination information, if not add it
+        - base_feat: boolean, if calculate basic feature of each trajectory such as speed, accleration
         """
         self.df = df
         self.df.set_index(np.arange(df.shape[0]), inplace=True)
@@ -34,6 +35,7 @@ class TrajectoryDataset:
         self.timezone = timezone
         self.data_type = data_type
         self.count_od_info = count_od_info
+        self.base_feat = base_feat
 
         self._dataframe_preprocess()
         self._init_trajectories()
@@ -45,7 +47,10 @@ class TrajectoryDataset:
     def _dataframe_preprocess(self):
         """Generate more feature for analysis"""
         # 1. add baisc feature like date, time in day, ....
+        if self.data_type != 'porto':
+            self.df['TIMESTAMP'] = self.df.apply(lambda df: df['TIMESTAMPS'][0], axis=1)
         self.df['TIME'] = pd.to_datetime(self.df['TIMESTAMP'], unit='s', utc=True)
+        
         self.df.TIME = self.df.TIME.dt.tz_convert(self.timezone)
         # 2. group df for specific driver analysis
         self.grouped_df = self.df.groupby('LABEL')
@@ -59,10 +64,12 @@ class TrajectoryDataset:
 
     def _init_trajectories(self):
         """Initilize trajectory objects"""
-        
-        self.trajectories = [Trajectory(r['POLYLINE'], porto_timestamps(r['TIMESTAMP'], len(r['POLYLINE'])), r['LABEL'], traj_id=i,
-            turning_threshold=self.turning_threshold, use_graph_feature=self.use_graph_feature, acc_threshold=self.acc_threshold) for i, r in self.df.iterrows()]
-        
+        if self.data_type == 'porto':
+            self.trajectories = [Trajectory(r['POLYLINE'], porto_timestamps(r['TIMESTAMP'], len(r['POLYLINE'])), r['LABEL'], traj_id=i, base_feat=self.base_feat,
+                turning_threshold=self.turning_threshold, use_graph_feature=self.use_graph_feature, acc_threshold=self.acc_threshold) for i, r in self.df.iterrows()]
+        else:
+            self.trajectories = [Trajectory(r['POLYLINE'], r['TIMESTAMPS'], r['LABEL'], traj_id=i, base_feat=self.base_feat,
+                turning_threshold=self.turning_threshold, use_graph_feature=self.use_graph_feature, acc_threshold=self.acc_threshold) for i, r in self.df.iterrows()]
     
     def generate_trajectories_feature(self):
         """Generate data for feature engineering
