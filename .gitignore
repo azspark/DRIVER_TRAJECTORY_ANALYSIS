@@ -134,6 +134,8 @@ dmypy.json
 data/
 /log
 *.txt
+*.pkl
+*.npy
 .idea/
 /tmp
 /ipynb
