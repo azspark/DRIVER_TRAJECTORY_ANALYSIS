@@ -20,18 +20,17 @@ from .point import Point
 # geo_range = {'lat_min': 40.953673, 'lat_max': 41.307945, 'lon_min': -8.735152, 'lon_max': -8.156309}
 
 class CityCells:
-    def __init__(self, div_number=100, geo_range={'lat_min': 40.953673, 'lat_max': 41.307945, 'lon_min': -8.735152, 'lon_max': -8.156309}):
+    def __init__(self, div_number, geo_range):
         """
 
         :param div_number:
-        :param geo_range:
         """
         self.point2cell = dict()
         self.div_number = div_number
         self.min_x, self.min_y, self.max_x, self.max_y = geo_range['lon_min'], geo_range['lat_min'], geo_range['lon_max'], geo_range['lat_max']
         self.gap_x, self.gap_y = self._cell_gap(self.div_number)
 
-    def _cell_gap(self, nums=100):
+    def _cell_gap(self, nums):
         """find the gap for the target nums
 
         Args:
@@ -55,11 +54,14 @@ class CityCells:
         y = y.astype(np.int)
 
         assert len(x) == len(y)
+        visited = set()
         for i in range(len(x)):
             point = Point(x[i], y[i])
             if point not in self.point2cell:
                 self.point2cell[point] = Cell(point)
-            self.point2cell[point].add(driver_id, traj_id)
+            if point not in visited:
+                self.point2cell[point].add(driver_id, traj_id)
+            # visited.add(point)
 
     def add_trips(self, df):
         """add the train trajectories to the cells
@@ -67,7 +69,7 @@ class CityCells:
         :param df: pd.DataFrame, ['LABEL', 'TIMESTAMP', 'DISTANCE', 'SD', 'TAXI_ID', 'POLYLINE', 'TRAJ_ID']
         :return: None
         """
-        for idx, traj in df.iterrows():
+        for idx, traj in tqdm(df.iterrows(), desc=""):
             traj_id = traj['TRAJ_ID'] # id of the trajectory
             driver_id = traj['TAXI_ID']
             trip = np.array(traj['POLYLINE'])
@@ -91,12 +93,14 @@ class CityCells:
 
         ans = Counter(dict())
         assert len(x) == len(y)
+        visited = set()
         for i in range(len(x)):
             point = Point(x[i], y[i])
             # pay attention to the following lines, these are algorithms for top-k
-            if point in self.point2cell:
+            if point in self.point2cell and point not in visited:
                 tmp = Counter(dict(self.point2cell[point].topk_drivers(k)))
                 ans = ans + tmp
+                # visited.add(point)
 
         ans = dict(ans)
         ans = sorted(ans.items(), key=lambda x: x[1], reverse=True)
@@ -114,14 +118,25 @@ class CityCells:
         trip1 = np.array(trip1)
         trip2 = np.array(trip2)
         drivers1 = self._find_topk_driver(trip1, k)
-        drivers2 = self._find_topk_driver(trip2, k)        
+        drivers2 = self._find_topk_driver(trip2, k)
         
-        theshold = k/2 if k < 20 else math.sqrt(k)/1.3
-        if len(set(drivers1).intersection(set(drivers2))) > theshold:
+        # theshold = k/1.5 if k < 20 else math.sqrt(k)/1.3
+        # if len(set(drivers1).intersection(set(drivers2))) > theshold:
+        theshold = sum([i*i for i in range(1, int(k//2))])
+        if self._score(drivers1, drivers2) > theshold:
             return True
         else:
             return False
 
+    def _score(self, driver1, driver2):
+        k = len(driver1)
+        score1 = {driver:rank for driver, rank in zip(driver1, list(range(1,k+1))[::-1])}
+        score2 = {driver:rank for driver, rank in zip(driver2, list(range(1,k+1))[::-1])}
+        keys = set(score1.keys()).intersection(set(score2.keys()))
+        ans = 0
+        for key in keys:
+            ans += score1[key]*score2[key]
+        return ans
 
     def __str__(self):
         f = f'minx, miny, maxx, maxy, gapx, gapy {self.min_x}, {self.min_y}, {self.max_x}, {self.max_y}, {self.gap_x}, {self.gap_y}'
